@@ -2,7 +2,6 @@
 
 GPT Personal Assistant is a Python-based intelligent assistant that helps manage your daily schedule. By integrating with your local ICS file for calendar events and a text file for tasks, it generates a personalized daily schedule that aligns with your preferences and existing commitments. This interactive tool interacts with you to fine-tune the schedule, ensuring a productive and balanced day.
 
-![Screenshot of GPT Personal Assistant Interface](screenshot1.png)
 ![](img/20231026171140.png)
 ![](img/20231026171153.png)
 
@@ -15,6 +14,8 @@ GPT Personal Assistant is a Python-based intelligent assistant that helps manage
 - **Flexible Configuration**: Allows you to set up initial preferences such as the location of calendar and task files, and your timezone.
 
 ![](img/20231026170918.png)
+![](img/20231026171110.png)
+
 
 ## Usage
 
@@ -36,7 +37,6 @@ GPT Personal Assistant is a Python-based intelligent assistant that helps manage
     - Update the specified task file and calendar file as needed.
     - Run `python main.py` again to generate a new schedule based on the updated information.
 
-![](img/20231026171110.png)
 ## Todos
 
 - Implement feature to read ICS files from HTTPS sources.
