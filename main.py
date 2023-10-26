@@ -7,10 +7,17 @@ from icalendar import Calendar as iCalendar
 import openai
 from ics import Calendar, Event
 import pytz
+import webbrowser
 
-
+def open_ics_file(file_path):
+    try:
+        webbrowser.open(file_path)
+    except Exception as e:
+        print(f"Failed to open the ICS file: {e}")
 
 def configure():
+    print("Configuring preferences...")
+
     # Pre-defined list of common timezones
     common_timezones = [
         "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
@@ -20,7 +27,9 @@ def configure():
     if os.path.exists('preferences.json'):
         with open('preferences.json', 'r') as file:
             preferences = json.load(file)
+            print("Preferences file found!")
     else:
+        print("No Preferences file found. Starting Preferences generation.")
         preferences = {}
         preferences['ics_path'] = input("Enter the path to your ICS file: ")
         preferences['txt_path'] = input("Enter the path to your text file: ")
@@ -45,6 +54,22 @@ def configure():
         else:
             print("Invalid selection. Defaulting to UTC.")
             preferences['timezone'] = "UTC"
+
+        # New user preferences for scheduling
+        print("\n(Optional) Scheduling Preferences:")
+        preferences['task_preference'] = input("Do you prefer to do your tasks before, after, or in-between your events? You can enter a combination of options: ").strip()
+        preferences['specific_times'] = input("Are there specific times you prefer to do certain kinds of tasks? (e.g., creative tasks in the morning): ").strip()
+        preferences['schedule_breaks'] = input("Do you want me to schedule breaks throughout the day? (yes/no): ").strip().lower()
+
+        if preferences['schedule_breaks'] == 'yes':
+            preferences['break_length'] = input("How long should the breaks be? (e.g., 15m): ").strip()
+            preferences['break_frequency'] = input("How often should the breaks be? (e.g., every 2 hours): ").strip()
+        else:
+            preferences['break_length'] = ''
+            preferences['break_frequency'] = ''
+
+        preferences['start_time'] = input("What time do you want to start your day? (Optional, format HH:MM): ").strip()
+        preferences['end_time'] = input("What time do you want to end your day? (Optional, format HH:MM): ").strip()
 
         with open('preferences.json', 'w') as file:
             json.dump(preferences, file)
@@ -93,7 +118,6 @@ def interact_with_ai(messages):
             messages=messages
         )
         reply = response['choices'][0]['message']['content'].strip()
-        print(f"AI Response: {reply}")  # Debug output
         return reply
     except Exception as e:
         print(f"Error in AI interaction: {e}")
@@ -105,28 +129,29 @@ def generate_schedule(events, tasks):
     tasks_text = '\n'.join(tasks)
     
     # Construct the initial prompt for the AI
-    prompt = f"""
-    I am going to give you a list of calendar events and tasks for today that we will work together on to make a daily schedule. 
-    Here is the list of events and tasks: 
-    Events:
-    {events_text}
-    Tasks:
-    {tasks_text}
-    """
+    initial_prompt = f"""
+I am going to give you a list of calendar events and tasks for today that we will work together on to make a daily schedule. Here are some of the user's preferences:
+Task Preference: {preferences['task_preference']}
+Specific Times for Tasks: {preferences['specific_times']}
+Schedule Breaks: {preferences['schedule_breaks']}
+Break Length: {preferences['break_length']}
+Break Frequency: {preferences['break_frequency']}
+Start Time: {preferences['start_time']}
+End Time: {preferences['end_time']}
 
-    prompt = f"""
-    I am going to give you a list of calendar events and tasks for today that we will work together on to make a daily schedule. The schedule output  must have one event on each line and must be in the exact format like this: start time, duration in minutes, event description. An example line looks like this: 09:00, 30m, Book your NYC trip. Only output the schedule output and no additional text or information.
+Try to determine the length of tasks yourself. Ask any clarifying questions you have about the tasks or user's preferences. Feel free to make suggestions you think will make the user's day better and more productive. 
 
-    Events:
-    {events_text}
-    Tasks:
-    {tasks_text}
-    """
+Your questions output must start with a new line that says "Questions:" followed by each question on a new line.
 
+Once the user has confirmed the schedule, output the schedule. The schedule output must have one event on each line and must be in the exact format like this: start time, duration in minutes, event description. An example line looks like this: 09:00, 30m, Book your NYC trip.
+
+Here are the list of events and tasks:
+Events:
+{events_text}
+Tasks:
+{tasks_text}
+"""
     
-    print(f"Initial Prompt: {prompt}")  # Debug output
-    
-    # Initial message to the AI
     messages = [
         {
             "role": "system",
@@ -134,50 +159,130 @@ def generate_schedule(events, tasks):
         },
         {
             "role": "user",
-            "content": prompt
+            "content": initial_prompt
         }
     ]
+    schedule_confirmed = False
+    print(f"Found Events:\n\n{events_text}\n\nFound Tasks:\n\n{tasks_text}")
+    while not schedule_confirmed:
+       
+        # Send the current prompt to the AI
+        ai_response = interact_with_ai(messages)
+        
+        # Process the AI's response, updating the schedule as necessary
+        # and getting any clarifying questions from the AI
+        schedule_lines, ai_questions = process_ai_response(ai_response)        
+        
+        if ai_questions:
+            # If the AI has questions, get the user's feedback
+            user_feedback = get_user_feedback(ai_questions)
+            
+            # Update the messages list with the AI's questions and the user's feedback
+            messages.extend([
+                {"role": "assistant", "content": ai_questions},
+                {"role": "user", "content": user_feedback}
+            ])
+        elif schedule_lines:
+            # If the AI proposes a schedule, confirm the schedule with the user
+            schedule_confirmed = get_user_confirmation(schedule_lines)
+            if not schedule_confirmed:  # If the schedule is not confirmed, ask for user feedback for adjustments
+                user_feedback = get_user_feedback("Please provide feedback for adjustments:")
+                messages.extend([
+                    {"role": "assistant", "content": '\n'.join(schedule_lines)},
+                    {"role": "user", "content": user_feedback}
+                ])
     
-    # Send the initial prompt to the AI
-    reply = interact_with_ai(messages)
+    return schedule_lines
+
+
+def process_ai_response(ai_response):
+    # Split the response into individual lines
+    lines = ai_response.split('\n')
     
+    # Initialize empty lists to hold the schedule lines and questions
     schedule_lines = []
-    for line in reply.split('\n'):  # Loop through each line of the output
-        match = re.match(r'(\d+:\d+),\s*(\d+)m,\s*(.+)', line)  # Updated regex pattern to match the new schedule format
-        if match:
-            start_time, duration_minutes, description = match.groups()
-            # Convert to 24-hour format
-            start_hour, start_minute = map(int, start_time.split(':'))
-            # Calculate end time in minutes
-            end_time_minutes = (start_hour * 60 + start_minute) + int(duration_minutes)
-            # Convert back to hour and minute format
-            end_hour = end_time_minutes // 60
-            end_minute = end_time_minutes % 60
-            formatted_line = f"{start_hour:02d}:{start_minute:02d}-{end_hour:02d}:{end_minute:02d}, {duration_minutes}m, {description}"
-            schedule_lines.append(formatted_line)
-    if schedule_lines:  # Check if there are any schedule lines in the output
-        print(f"Schedule: {schedule_lines}")
-        return schedule_lines
-    else:
-        raise ValueError("No schedule lines found in the output")  # Throw an error if the output is empty
+    questions = []
+    
+    # Define a regex pattern to match the schedule line format 'HH:MM, Xm, Description'
+    schedule_line_pattern = re.compile(r'\d{2}:\d{2}, \d{1,3}m, .+')
+    
+    # Initialize flags to indicate when we've started collecting schedule lines or questions
+    collecting_schedule_lines = False
+    collecting_questions = False
+    
+    # Iterate through each line in the response
+    for line in lines:
+        # If the line contains 'Questions:', start collecting questions
+        if 'Questions:' in line:
+            collecting_questions = True
+            collecting_schedule_lines = False  # Stop collecting schedule lines if we were doing so
+        
+        # If the line matches the schedule line format, start collecting schedule lines
+        elif schedule_line_pattern.match(line):
+            collecting_schedule_lines = True
+            collecting_questions = False  # Stop collecting questions if we were doing so
+        
+        # If we're collecting questions, add the current line to the questions list
+        if collecting_questions:
+            questions.append(line)
+        
+        # If we're collecting schedule lines, add the current line to the schedule lines list
+        elif collecting_schedule_lines:
+            schedule_lines.append(line)
+    
+    # Join the questions list into a single string, separating questions with '\n'
+    ai_questions = '\n'.join(questions).strip()
+    
+    return schedule_lines, ai_questions
 
 
+
+def get_user_feedback(prompt):
+    print("\nGPT has " + str(len(prompt.split('\n')[1:])) +" questions for you.\n")
+    feedback = []
+    for question in prompt.split('\n')[1:]:  # Skip the 'Questions:' line
+        if question:  # Ensure the question is not an empty string
+            print(question)
+            answer = input("Your Answer: ")
+            feedback.append(answer)
+    return '\n'.join(feedback)
+
+def get_user_confirmation(schedule_lines):
+    print("\nProposed Schedule:")
+    for line in schedule_lines:
+        print(line)
+    confirmation = input("\nIs this schedule acceptable? (yes/no): ")
+    return confirmation.lower() == 'yes'
 
 
 
 # Step 5: Format Validation
 def validate_format(schedule):
+    def convert_duration_to_minutes(duration):
+        if 'hr' in duration:
+            hours = int(duration.replace('hr', ''))
+            return f'{hours * 60}m'
+        return duration
+
     try:
+        normalized_schedule = []  # Create a list to hold the normalized schedule lines
         for line in schedule:
+            # Skip empty lines or lines without the expected number of comma-separated values
+            if not line or len(line.split(', ')) != 3:
+                continue
             values = line.split(', ')
-            if len(values) != 3:
-                raise ValueError(f"Unexpected format: {line}. Expected format: 'HH:MM, Xm, Description'")
             time, duration, description = values
             assert re.match(r'\d{2}:\d{2}', time), f"Invalid time format in line: {line}"
-            assert re.match(r'\d+m', duration), f"Invalid duration format in line: {line}"
+            normalized_duration = convert_duration_to_minutes(duration)
+            assert re.match(r'\d+m', normalized_duration), f"Invalid duration format in line: {line}"
+            # Create a normalized schedule line and append it to the normalized_schedule list
+            normalized_schedule.append(f"{time}, {normalized_duration}, {description}")
+
+        return normalized_schedule  # Return the normalized schedule
     except Exception as e:
         print(f"Error in format validation: {e}")
         raise
+
 
 def create_ics(schedule, preferences):
     try:
@@ -185,9 +290,15 @@ def create_ics(schedule, preferences):
         ics_content = "BEGIN:VCALENDAR\nVERSION:2.0\n"
         
         for line in schedule:
-            time_str, duration, description = line.split(', ')
-            # Split the time string into start and end times
-            start_time_str, end_time_str = time_str.split('-')
+            if not line or len(line.split(', ')) != 3 or not line.strip():
+  # skip empty lines
+                continue
+            try:
+                start_time_str, duration, description = line.split(', ')
+            except ValueError as e:
+                print(f"Error parsing line: {line}")
+                raise e  # re-raise the exception to keep the original traceback
+
             # Parse the start time
             start_time = datetime.combine(date.today(), datetime.strptime(start_time_str, '%H:%M').time())
             # Calculate the end time
@@ -214,7 +325,9 @@ def create_ics(schedule, preferences):
             file.write(ics_content)
     except Exception as e:
         print(f"Error in ICS file creation: {e}")
-        raise
+        raise  # re-raise the exception to keep the original traceback
+
+
 
 
 
@@ -242,11 +355,14 @@ def calculate_end_time(start_time, duration):
 # Main function
 def main():
     openai.api_key = os.getenv('OPENAI_API_KEY')
+    print("Welcome to GPT Personal Assistant! Let's start planning out your day.")
+    global preferences
     preferences = configure()
     events, tasks = extract_data(preferences)
     schedule = generate_schedule(events, tasks)
     validate_format(schedule)
     create_ics(schedule, preferences)
+    open_ics_file("generated_schedule.ics")
 
 if __name__ == '__main__':
     main()

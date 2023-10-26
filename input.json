@@ -1,9 +1,0 @@
-{
-    "ics_file": "calendar.ics",
-    "text_file": "tasks.txt",
-    "date": "20231025",
-    "day_start": "09:00",
-    "day_end": "18:00",
-    "time_zone": "America/Chicago",
-    "prompt": "I am going to give you a list of calendar events and tasks for today that we will work together on to make a daily schedule. You can ask me any questions you have about the length a task will take if you're not able to figure it out yourself, which tasks we should try to complete today if there are too many, suggest new tasks or breaks if there's extra time in the day, ask questions around preference for time of day, and ask any other questions or make any other suggestions you think will make a better daily schedule for me. The schedule output  must have one event on each line and must be in the exact format like this: start time, duration in minutes, event description. An example line looks like this: 09:00, 30m, Book your NYC trip."
-}
