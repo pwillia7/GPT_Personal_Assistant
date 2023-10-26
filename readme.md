@@ -14,8 +14,7 @@ GPT Personal Assistant is a Python-based intelligent assistant that helps manage
 - **Flexible Configuration**: Allows you to set up initial preferences such as the location of calendar and task files, and your timezone.
 
 ![](img/20231026170918.png)
-![](img/20231026171110.png)
-
+![](img/20231026172336.png)
 
 ## Usage
 
