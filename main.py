@@ -211,8 +211,28 @@ Tasks:
                     {"role": "assistant", "content": '\n'.join(schedule_lines)},
                     {"role": "user", "content": feedback}
                 ])
-
+    handle_leftover_tasks(tasks, schedule_lines)
     return schedule_lines
+
+def handle_leftover_tasks(all_tasks, scheduled_lines):
+    try:
+        # Extract task descriptions from the schedule
+        scheduled_tasks = [
+            line.split(', ')[2] for line in scheduled_lines
+            if len(line.split(', ')) == 3 and 'm' in line.split(', ')[1]
+        ]
+
+        # Find tasks that were not scheduled
+        unscheduled_tasks = [task for task in all_tasks if task not in scheduled_tasks]
+
+        # Write unscheduled tasks to the leftover tasks file
+        with open('task_leftover.txt', 'a') as file:
+            for task in unscheduled_tasks:
+                file.write(f"{task}\n")
+
+    except Exception as e:
+        print(f"An error occurred while handling leftover tasks: {str(e)}")
+
 
 def process_ai_response(ai_response):
     # Split the response into individual lines
@@ -281,14 +301,20 @@ def get_user_confirmation(schedule_lines):
         print("Invalid input. Please enter 'yes' or 'no'.")
         return get_user_confirmation(schedule_lines)
     
+
+def convert_duration_to_minutes(duration):
+        total_minutes = 0
+        if 'hr' in duration or 'h' in duration:
+            hours = re.search(r'(\d+)(?:hr|h)', duration)
+            if hours:
+                total_minutes += int(hours.group(1)) * 60
+        if 'm' in duration:
+            minutes = re.search(r'(\d+)m', duration)
+            if minutes:
+                total_minutes += int(minutes.group(1))
+        return f'{total_minutes}m'
 # Step 5: Format Validation
 def validate_format(schedule):
-    def convert_duration_to_minutes(duration):
-        if 'hr' in duration:
-            hours = int(duration.replace('hr', ''))
-            return f'{hours * 60}m'
-        return duration
-
     try:
         normalized_schedule = []  
         for line in schedule:
@@ -314,23 +340,33 @@ def validate_format(schedule):
 def create_ics(schedule, preferences, existing_event_times):
     try:
         ics_content = "BEGIN:VCALENDAR\nVERSION:2.0\n"
+        include_existing = preferences.get('include_existing_events', 'yes').lower() == 'yes'
+
+        end_time_str = preferences.get('end_time', '18:00')  # Default to 18:00 if no end time is set
+        end_time_default = datetime.combine(date.today(), datetime.strptime(end_time_str, '%H:%M').time())
 
         for line in schedule:
             if not line or len(line.split(', ')) != 3 or not line.strip():
                 continue
-            try:
-                start_time_str, duration, description = line.split(', ')
-            except ValueError as e:
-                print(f"Error parsing line: {line}")
-                raise e
 
+            start_time_str, duration, description = line.split(', ')
             start_time = datetime.combine(date.today(), datetime.strptime(start_time_str, '%H:%M').time())
-            duration_minutes = int(duration[:-1])
+
+            if duration.lower() == 'to end of day':
+                duration_minutes = (end_time_default - start_time).seconds // 60
+            else:
+                duration_minutes_str = convert_duration_to_minutes(duration)
+                try:
+                    duration_minutes = int(duration_minutes_str[:-1])
+                except ValueError:
+                    print(f"Skipping line due to invalid duration format: {line}")
+                    continue  # Skip this line and proceed with the next
+
             end_time = start_time + timedelta(minutes=duration_minutes)
 
             time_range_str = f"{start_time_str}-{end_time.strftime('%H:%M')}"
-            if time_range_str in existing_event_times and preferences['include_existing_events'].lower() == 'no':
-                continue  # Skip adding this event if the preference to include existing events is set to 'no'
+            if time_range_str in existing_event_times and not include_existing:
+                continue
 
             timezone = preferences.get('timezone', 'UTC')
             event_string = (
@@ -351,11 +387,6 @@ def create_ics(schedule, preferences, existing_event_times):
     except Exception as e:
         print(f"Error in ICS file creation: {e}")
         raise
-
-
-
-
-
 
 
 # Function to calculate the end time based on the start time and duration
